@@ -1,0 +1,206 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Global Safety Net - Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helper Functions ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && (request.auth.token.email_verified == true || request.auth.token.firebase.sign_in_provider == 'anonymous');
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Fetch user profile of the active user for tenant isolation
+    function getUserDoc(businessId) {
+      return get(/databases/$(database)/documents/businesses/$(businessId)/users/$(request.auth.uid));
+    }
+
+    function isUserOfBusiness(businessId) {
+      return isSignedIn() && exists(/databases/$(database)/documents/businesses/$(businessId)/users/$(request.auth.uid));
+    }
+
+    function getUserRole(businessId) {
+      return getUserDoc(businessId).data.role;
+    }
+
+    // Role-based Access Control inside the business
+    function hasRole(businessId, roles) {
+      return isUserOfBusiness(businessId) && (getUserRole(businessId) in roles);
+    }
+
+    function isAdmin(businessId) {
+      return hasRole(businessId, ['ADMINISTRADOR']);
+    }
+
+    function isAtLeastEncargado(businessId) {
+      return hasRole(businessId, ['ADMINISTRADOR', 'ENCARGADO']);
+    }
+
+    function isAtLeastCajero(businessId) {
+      return hasRole(businessId, ['ADMINISTRADOR', 'ENCARGADO', 'CAJERO']);
+    }
+
+    // --- Business Resource Rules ---
+    match /businesses/{businessId} {
+      allow get: if isUserOfBusiness(businessId);
+      // Anyone signed in can create their first business, but once created, it's locked to administrators
+      allow create: if isVerifiedUser() && isValidId(businessId) && incoming().keys().hasAll(['id', 'name', 'cuit', 'taxCondition', 'createdAt']) && incoming().id == businessId;
+      allow update: if isVerifiedUser() && isAdmin(businessId) && incoming().id == existing().id;
+      allow delete: if false; // Businesses are commercial entities and cannot be deleted from client
+
+      // --- Branches ---
+      match /branches/{branchId} {
+        allow list, get: if isUserOfBusiness(businessId);
+        allow create, update: if isVerifiedUser() && isAdmin(businessId) && isValidId(branchId) && incoming().id == branchId;
+        allow delete: if false;
+
+        // --- Cash Registers ---
+        match /cash_registers/{registerId} {
+          allow list, get: if isUserOfBusiness(businessId);
+          allow create: if isVerifiedUser() && isAtLeastEncargado(businessId) && isValidId(registerId);
+          allow update: if isVerifiedUser() && isAtLeastCajero(businessId) && incoming().id == existing().id;
+          allow delete: if false;
+        }
+
+        // --- Cash Sessions (Caja) ---
+        match /cash_sessions/{sessionId} {
+          allow list, get: if isUserOfBusiness(businessId);
+          // Only Cajeros and above can open a session
+          allow create: if isVerifiedUser() && isAtLeastCajero(businessId) && isValidId(sessionId) && incoming().status == 'OPEN' && incoming().openedBy == request.auth.uid;
+          // Session closing or modification
+          allow update: if isVerifiedUser() && isAtLeastCajero(businessId) && incoming().id == existing().id && (
+            // Cajero can close a session once
+            (existing().status == 'OPEN' && incoming().status == 'CLOSED' && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'closedAt', 'declaredCash', 'difference'])) ||
+            // Admin can modify anytime
+            isAdmin(businessId)
+          );
+          allow delete: if false;
+
+          // --- Cash Movements ---
+          match /movements/{movementId} {
+            allow list, get: if isUserOfBusiness(businessId);
+            allow create: if isVerifiedUser() && isAtLeastCajero(businessId) && isValidId(movementId) && incoming().userId == request.auth.uid;
+            allow update, delete: if false; // Audit logs for money must be immutable
+          }
+        }
+      }
+
+      // --- Users of Business ---
+      match /users/{userId} {
+        allow get: if isUserOfBusiness(businessId) && (request.auth.uid == userId || isAdmin(businessId));
+        allow list: if isUserOfBusiness(businessId) && isAdmin(businessId);
+        
+        // Initial user creation (bootstrapping first admin) or user creation by existing admin
+        allow create: if isVerifiedUser() && isValidId(userId) && (
+          // Admin creating another user
+          isAdmin(businessId) ||
+          // First user bootstrapping their own admin role in a new business where no users exist yet
+          (!exists(/databases/$(database)/documents/businesses/$(businessId)/users/$(userId)) && incoming().role == 'ADMINISTRADOR' && userId == request.auth.uid)
+        );
+
+        allow update: if isVerifiedUser() && (
+          // Only Admin can modify roles or other users' profiles
+          (isAdmin(businessId) && incoming().id == existing().id && userId != request.auth.uid) ||
+          // User can update their own non-role fields (e.g., name)
+          (userId == request.auth.uid && incoming().role == existing().role && incoming().diff(existing()).affectedKeys().hasOnly(['name']))
+        );
+        allow delete: if isVerifiedUser() && isAdmin(businessId);
+      }
+
+      // --- Categories ---
+      match /categories/{categoryId} {
+        allow list, get: if isUserOfBusiness(businessId);
+        allow create, update: if isVerifiedUser() && isAtLeastEncargado(businessId) && isValidId(categoryId);
+        allow delete: if isVerifiedUser() && isAdmin(businessId);
+      }
+
+      // --- Products ---
+      match /products/{productId} {
+        allow list, get: if isUserOfBusiness(businessId);
+        allow create, update: if isVerifiedUser() && isAtLeastEncargado(businessId) && isValidId(productId) && incoming().id == productId;
+        allow delete: if isVerifiedUser() && isAdmin(businessId);
+      }
+
+      // --- Customers ---
+      match /customers/{customerId} {
+        allow list, get: if isUserOfBusiness(businessId);
+        allow create, update: if isVerifiedUser() && isAtLeastCajero(businessId) && isValidId(customerId);
+        allow delete: if isVerifiedUser() && isAdmin(businessId);
+      }
+
+      // --- Sales (POS) ---
+      match /sales/{saleId} {
+        allow list, get: if isUserOfBusiness(businessId);
+        allow create: if isVerifiedUser() && isAtLeastCajero(businessId) && isValidId(saleId) && incoming().userId == request.auth.uid && incoming().status == 'COMPLETED';
+        allow update: if isVerifiedUser() && (
+          // Terminal State Locking - Cannot modify completed sales unless you are an admin correcting it
+          (isAdmin(businessId) && incoming().id == existing().id) ||
+          (isAtLeastCajero(businessId) && existing().status == 'SUSPENDED' && (incoming().status == 'COMPLETED' || incoming().status == 'CANCELLED'))
+        );
+        allow delete: if false; // In POS systems, sales are never deleted, they are refunded or cancelled.
+
+        // --- Sale Items ---
+        match /items/{itemId} {
+          allow list, get: if isUserOfBusiness(businessId);
+          allow create: if isVerifiedUser() && isAtLeastCajero(businessId) && isValidId(itemId);
+          allow update, delete: if isVerifiedUser() && isAdmin(businessId);
+        }
+
+        // --- Payments ---
+        match /payments/{paymentId} {
+          allow list, get: if isUserOfBusiness(businessId);
+          allow create: if isVerifiedUser() && isAtLeastCajero(businessId) && isValidId(paymentId);
+          allow update: if isVerifiedUser() && isAtLeastCajero(businessId) && incoming().id == existing().id;
+          allow delete: if false;
+        }
+      }
+
+      // --- Stock Movements (Kardex) ---
+      match /stock_movements/{movementId} {
+        allow list, get: if isUserOfBusiness(businessId);
+        allow create: if isVerifiedUser() && isAtLeastEncargado(businessId) && isValidId(movementId) && incoming().userId == request.auth.uid;
+        allow update, delete: if false; // Stock ledger must be strictly immutable
+      }
+
+      // --- Audit Logs ---
+      match /audit_logs/{logId} {
+        allow list, get: if isUserOfBusiness(businessId) && isAdmin(businessId);
+        allow create: if isVerifiedUser() && isValidId(logId) && incoming().userId == request.auth.uid;
+        allow update, delete: if false; // Audit trail must be tamper-proof
+      }
+
+      // --- ARCA Config ---
+      match /arca_config/main {
+        allow get: if isUserOfBusiness(businessId) && isAtLeastEncargado(businessId);
+        allow create, update: if isVerifiedUser() && isAdmin(businessId);
+        allow delete: if false;
+      }
+
+      // --- Invoices ---
+      match /invoices/{invoiceId} {
+        allow list, get: if isUserOfBusiness(businessId);
+        allow create: if isVerifiedUser() && isAtLeastCajero(businessId) && isValidId(invoiceId);
+        allow update: if isVerifiedUser() && isAdmin(businessId) && incoming().id == existing().id;
+        allow delete: if false;
+      }
+    }
+  }
+}

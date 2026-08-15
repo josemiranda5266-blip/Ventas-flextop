@@ -1,0 +1,6 @@
+{
+  "name": "POS Argentina",
+  "description": "Sistema profesional e independiente de Punto de Venta (POS), stock, caja, facturación de ARCA y cobros de Mercado Pago para comercios en Argentina.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

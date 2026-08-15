@@ -1,0 +1,332 @@
+{
+  "entities": {
+    "Business": {
+      "title": "Business",
+      "description": "Comercio principal (Tenant)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "ID del comercio" },
+        "name": { "type": "string", "description": "Nombre de la empresa" },
+        "cuit": { "type": "string", "description": "CUIT de la empresa" },
+        "taxCondition": { "type": "string", "description": "Condición fiscal de la empresa, ej. Responsable Inscripto o Monotributo" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Fecha de creación" }
+      },
+      "required": ["id", "name", "cuit", "taxCondition", "createdAt"]
+    },
+    "Branch": {
+      "title": "Branch",
+      "description": "Sucursal de un comercio",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "address", "createdAt"]
+    },
+    "CashRegister": {
+      "title": "CashRegister",
+      "description": "Caja física en una sucursal",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "branchId": { "type": "string" },
+        "name": { "type": "string" },
+        "status": { "type": "string", "enum": ["OPEN", "CLOSED"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "branchId", "name", "status", "createdAt"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Usuario del sistema (Cajero, Admin, etc.)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Auth UID" },
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["ADMINISTRADOR", "ENCARGADO", "CAJERO", "VENDEDOR", "AUDITOR"] },
+        "branchId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "email", "name", "role", "branchId", "createdAt"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Categoría de producto",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "createdAt"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Producto del catálogo",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "barcode": { "type": "string" },
+        "sku": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "categoryId": { "type": "string" },
+        "costPrice": { "type": "number" },
+        "salePrice": { "type": "number" },
+        "margin": { "type": "number" },
+        "taxRate": { "type": "number" },
+        "stock": { "type": "number" },
+        "minStock": { "type": "number" },
+        "maxStock": { "type": "number" },
+        "supplierId": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "code", "name", "costPrice", "salePrice", "taxRate", "stock", "status", "createdAt"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Cliente del comercio",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "dni": { "type": "string" },
+        "cuit": { "type": "string" },
+        "taxCondition": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "creditLimit": { "type": "number" },
+        "balance": { "type": "number" },
+        "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "taxCondition", "creditLimit", "balance", "status", "createdAt"]
+    },
+    "CashSession": {
+      "title": "CashSession",
+      "description": "Sesión de caja abierta/cerrada",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "registerId": { "type": "string" },
+        "branchId": { "type": "string" },
+        "openedBy": { "type": "string" },
+        "openedAt": { "type": "string", "format": "date-time" },
+        "closedAt": { "type": "string", "format": "date-time" },
+        "initialCash": { "type": "number" },
+        "expectedCash": { "type": "number" },
+        "declaredCash": { "type": "number" },
+        "difference": { "type": "number" },
+        "status": { "type": "string", "enum": ["OPEN", "CLOSED"] }
+      },
+      "required": ["id", "registerId", "branchId", "openedBy", "openedAt", "initialCash", "status"]
+    },
+    "CashMovement": {
+      "title": "CashMovement",
+      "description": "Movimiento de efectivo en caja (Ingreso/Retiro/Gasto)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "type": { "type": "string", "enum": ["INGRESAR", "RETIRAR"] },
+        "amount": { "type": "number" },
+        "reason": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "sessionId", "type", "amount", "reason", "userId", "createdAt"]
+    },
+    "Sale": {
+      "title": "Sale",
+      "description": "Venta realizada",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "branchId": { "type": "string" },
+        "registerId": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "userId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "subtotal": { "type": "number" },
+        "discount": { "type": "number" },
+        "surcharge": { "type": "number" },
+        "taxTotal": { "type": "number" },
+        "total": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "status": { "type": "string", "enum": ["COMPLETED", "SUSPENDED", "CANCELLED", "REFUNDED"] },
+        "isFiscal": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "branchId", "registerId", "sessionId", "userId", "subtotal", "discount", "surcharge", "taxTotal", "total", "paymentMethod", "status", "isFiscal", "createdAt"]
+    },
+    "SaleItem": {
+      "title": "SaleItem",
+      "description": "Línea de producto vendida",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productId": { "type": "string" },
+        "name": { "type": "string" },
+        "qty": { "type": "number" },
+        "unitPrice": { "type": "number" },
+        "taxRate": { "type": "number" },
+        "subtotal": { "type": "number" }
+      },
+      "required": ["id", "productId", "name", "qty", "unitPrice", "taxRate", "subtotal"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Pago recibido en una venta",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "saleId": { "type": "string" },
+        "method": { "type": "string", "enum": ["EFECTIVO", "DEBITO", "CREDITO", "TRANSFERENCIA", "MERCADO_PAGO", "CUENTA_CORRIENTE"] },
+        "amount": { "type": "number" },
+        "reference": { "type": "string" },
+        "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED", "CANCELLED"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "saleId", "method", "amount", "status", "createdAt"]
+    },
+    "StockMovement": {
+      "title": "StockMovement",
+      "description": "Historial de movimientos de inventario (Kardex)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productId": { "type": "string" },
+        "type": { "type": "string", "enum": ["COMPRA", "VENTA", "ENTRADA", "SALIDA", "AJUSTE", "DEVOLUCION"] },
+        "qtyPrevious": { "type": "number" },
+        "qtyChange": { "type": "number" },
+        "qtyAfter": { "type": "number" },
+        "reason": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "productId", "type", "qtyPrevious", "qtyChange", "qtyAfter", "reason", "userId", "createdAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Registro de auditoría de seguridad para acciones críticas",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "action": { "type": "string" },
+        "details": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "userEmail", "action", "details", "createdAt"]
+    },
+    "ArcaConfig": {
+      "title": "ArcaConfig",
+      "description": "Configuración del servicio fiscal ARCA",
+      "type": "object",
+      "properties": {
+        "cuit": { "type": "string" },
+        "environment": { "type": "string", "enum": ["DESARROLLO", "HOMOLOGACION", "PRODUCCION"] },
+        "pointOfSale": { "type": "number" },
+        "certificate": { "type": "string" },
+        "privateKey": { "type": "string" },
+        "lastError": { "type": "string" },
+        "lastSyncAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["cuit", "environment", "pointOfSale"]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "Factura autorizada por ARCA",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "saleId": { "type": "string" },
+        "invoiceType": { "type": "string" },
+        "pointOfSale": { "type": "number" },
+        "invoiceNumber": { "type": "number" },
+        "cae": { "type": "string" },
+        "caeExpiration": { "type": "string" },
+        "status": { "type": "string", "enum": ["APPROVED", "PENDING_SYNC", "REJECTED"] },
+        "xmlRequest": { "type": "string" },
+        "xmlResponse": { "type": "string" },
+        "errorDetails": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "saleId", "invoiceType", "pointOfSale", "invoiceNumber", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/businesses/{businessId}": {
+      "schema": "Business",
+      "description": "Detalles del comercio"
+    },
+    "/businesses/{businessId}/branches/{branchId}": {
+      "schema": "Branch",
+      "description": "Sucursales del comercio"
+    },
+    "/businesses/{businessId}/branches/{branchId}/cash_registers/{registerId}": {
+      "schema": "CashRegister",
+      "description": "Cajas registradoras"
+    },
+    "/businesses/{businessId}/users/{userId}": {
+      "schema": "User",
+      "description": "Usuarios del comercio"
+    },
+    "/businesses/{businessId}/categories/{categoryId}": {
+      "schema": "Category",
+      "description": "Categorías de productos"
+    },
+    "/businesses/{businessId}/products/{productId}": {
+      "schema": "Product",
+      "description": "Productos del catálogo"
+    },
+    "/businesses/{businessId}/customers/{customerId}": {
+      "schema": "Customer",
+      "description": "Catálogo de clientes"
+    },
+    "/businesses/{businessId}/branches/{branchId}/cash_sessions/{sessionId}": {
+      "schema": "CashSession",
+      "description": "Sesiones diarias de caja"
+    },
+    "/businesses/{businessId}/branches/{branchId}/cash_sessions/{sessionId}/movements/{movementId}": {
+      "schema": "CashMovement",
+      "description": "Movimientos de efectivo en sesiones de caja"
+    },
+    "/businesses/{businessId}/sales/{saleId}": {
+      "schema": "Sale",
+      "description": "Ventas realizadas"
+    },
+    "/businesses/{businessId}/sales/{saleId}/items/{itemId}": {
+      "schema": "SaleItem",
+      "description": "Líneas de venta"
+    },
+    "/businesses/{businessId}/sales/{saleId}/payments/{paymentId}": {
+      "schema": "Payment",
+      "description": "Desglose de cobros de una venta"
+    },
+    "/businesses/{businessId}/stock_movements/{movementId}": {
+      "schema": "StockMovement",
+      "description": "Control de Kardex de Stock"
+    },
+    "/businesses/{businessId}/audit_logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Bitácora de auditoría"
+    },
+    "/businesses/{businessId}/arca_config/main": {
+      "schema": "ArcaConfig",
+      "description": "Configuración única de ARCA para el comercio"
+    },
+    "/businesses/{businessId}/invoices/{invoiceId}": {
+      "schema": "Invoice",
+      "description": "Facturas fiscales de ARCA"
+    }
+  }
+}

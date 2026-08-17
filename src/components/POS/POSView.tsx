@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db, handleFirestoreError, OperationType } from '../../lib/firebase';
+import { db, auth, handleFirestoreError, OperationType } from '../../lib/firebase';
 import { collection, addDoc, getDocs, updateDoc, doc, setDoc, query, where, getDoc } from 'firebase/firestore';
 import { Product, Category, Customer, Sale, SaleItem, SaleStatus, PaymentMethod, PaymentStatus, CashSession, UserProfile, StockMovementType } from '../../types';
 import { useBarcodeScanner } from '../../hooks/useBarcodeScanner';
@@ -382,13 +382,19 @@ export const POSView: React.FC<POSViewProps> = ({
       }
     }
 
-    // Mercado Pago payment state constraint
+    // Mercado Pago payment state constraint: STRICT ENFORCEMENT, NO MANUAL APPROVAL OVERRIDE
     if (mpPay > 0 && mpPaymentStatus !== 'APPROVED') {
-      const confirmForced = window.confirm("ATENCIÓN: Mercado Pago no ha devuelto confirmación aprobada para este pago. ¿Desea forzar la aprobación manual del pago bajo su responsabilidad?");
-      if (!confirmForced) return;
+      alert("ATENCIÓN: El pago con Mercado Pago no ha sido aprobado por la terminal. No se permiten aprobaciones manuales o forzadas por motivos de seguridad y auditoría financiera.");
+      return;
     }
 
     try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) {
+        alert("No se pudo verificar su identidad de usuario. Por favor, intente iniciar sesión nuevamente.");
+        return;
+      }
+
       const saleId = mpOrderReference || `SALE_${Math.random().toString(36).substring(4).toUpperCase()}`;
       
       const subtotalVal = calculateCartSubtotal();
@@ -396,127 +402,73 @@ export const POSView: React.FC<POSViewProps> = ({
       const surVal = getSurchargeAmount();
       const taxVal = calculateCartTaxes();
 
-      // 1. Save Sale to Firestore
-      const salePath = `businesses/${businessId}/sales`;
-      const saleDocRef = doc(db, salePath, saleId);
-      const saleData: Omit<Sale, 'id'> = {
-        branchId: userProfile.branchId,
-        registerId: 'REG_MAIN_01',
-        sessionId: activeSession.id,
-        userId: userProfile.id,
-        userName: userProfile.name,
-        customerId: selectedCustomer?.id || undefined,
-        customerName: selectedCustomer?.name || undefined,
-        subtotal: subtotalVal,
-        discount: discVal,
-        surcharge: surVal,
-        taxTotal: taxVal,
-        total: total,
-        paymentMethod: ccPay > 0 ? 'CUENTA_CORRIENTE' : totalPaid === ef ? 'EFECTIVO' : 'MIXTO',
-        status: SaleStatus.COMPLETED,
-        isFiscal: false,
-        createdAt: new Date().toISOString()
-      };
-
-      await setDoc(saleDocRef, saleData);
-
-      // 2. Save items as subcollection & discount stock atomically
-      const itemsPath = `${salePath}/${saleId}/items`;
-      for (const item of cart) {
-        const itemRef = doc(collection(db, itemsPath));
-        const itemSubtotal = (item.customPrice || item.product.salePrice) * item.qty;
-        
-        await setDoc(itemRef, {
-          productId: item.product.id,
-          name: item.product.name,
-          qty: item.qty,
-          unitPrice: item.customPrice || item.product.salePrice,
-          taxRate: item.product.taxRate,
-          subtotal: itemSubtotal
-        });
-
-        // UPDATE Stock in Firestore & register movement
-        const nextStock = item.product.stock - item.qty;
-        await updateDoc(doc(db, `businesses/${businessId}/products`, item.product.id), {
-          stock: nextStock
-        });
-
-        // Stock Movement Log
-        await addDoc(collection(db, `businesses/${businessId}/stock_movements`), {
-          productId: item.product.id,
-          productName: item.product.name,
-          type: StockMovementType.VENTA,
-          qtyPrevious: item.product.stock,
-          qtyChange: -item.qty,
-          qtyAfter: nextStock,
-          reason: `Venta POS #${saleId}`,
-          userId: userProfile.id,
-          userName: userProfile.name,
-          createdAt: new Date().toISOString()
-        });
-      }
-
-      // 3. Register payments breakdown
-      const paymentsPath = `${salePath}/${saleId}/payments`;
-      const pList: { method: string; amount: number }[] = [];
-      const paymentMethods = [
-        { key: 'EFECTIVO', value: ef },
-        { key: 'DEBITO', value: dbPay },
-        { key: 'CREDITO', value: crPay },
-        { key: 'TRANSFERENCIA', value: trPay },
-        { key: 'MERCADO_PAGO', value: mpPay },
-        { key: 'CUENTA_CORRIENTE', value: ccPay }
-      ];
-
-      for (const pMethod of paymentMethods) {
-        if (pMethod.value > 0) {
-          pList.push({ method: pMethod.key, amount: pMethod.value });
-          await addDoc(collection(db, paymentsPath), {
-            saleId,
-            method: pMethod.key,
-            amount: pMethod.value,
-            status: 'APPROVED',
-            createdAt: new Date().toISOString()
-          });
-        }
-      }
-
-      // 4. Update Cashier session expectedCash in Firestore (if Cash components were paid)
-      const expectedCashUpdate = activeSession.expectedCash + ef;
-      await updateDoc(doc(db, `businesses/${businessId}/branches/${userProfile.branchId}/cash_sessions`, activeSession.id), {
-        expectedCash: expectedCashUpdate
+      const response = await fetch('/api/sales/finalize', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`
+        },
+        body: JSON.stringify({
+          businessId,
+          branchId: userProfile.branchId,
+          activeSessionId: activeSession.id,
+          cart: cart.map(item => ({
+            product: { id: item.product.id },
+            qty: item.qty,
+            customPrice: item.customPrice,
+            discountPercent: item.discountPercent
+          })),
+          customerId: selectedCustomer?.id || undefined,
+          generalDiscount,
+          generalSurcharge,
+          payments: [
+            { method: 'EFECTIVO', amount: ef },
+            { method: 'DEBITO', amount: dbPay },
+            { method: 'CREDITO', amount: crPay },
+            { method: 'TRANSFERENCIA', amount: trPay },
+            { method: 'MERCADO_PAGO', amount: mpPay },
+            { method: 'CUENTA_CORRIENTE', amount: ccPay }
+          ].filter(p => p.amount > 0),
+          mpOrderReference: mpPay > 0 ? mpOrderReference : undefined
+        })
       });
 
-      // 5. If paid with Cuenta Corriente, update customer balance
-      if (ccPay > 0 && selectedCustomer) {
-        const nextBalance = selectedCustomer.balance + ccPay;
-        await updateDoc(doc(db, custPath, selectedCustomer.id), {
-          balance: nextBalance
-        });
-
-        // Write CC Log
-        await addDoc(collection(db, `businesses/${businessId}/cc_payment_logs`), {
-          customerId: selectedCustomer.id,
-          customerName: selectedCustomer.name,
-          amount: ccPay,
-          type: 'CREDITO_DEUDA',
-          details: `Compra a crédito POS #${saleId}`,
-          createdAt: new Date().toISOString()
-        });
+      const resData = await response.json();
+      if (!response.ok || !resData.success) {
+        alert(`¡Error al procesar la venta en el servidor!: ${resData.message || 'Error desconocido'}`);
+        return;
       }
 
-      // Audit Log
-      await addDoc(collection(db, `businesses/${businessId}/audit_logs`), {
-        userId: userProfile.id,
-        userEmail: userProfile.email,
-        action: "VENTA_POS",
-        details: `Venta registrada #${saleId}. Total: $${total}. Medio: ${ccPay > 0 ? 'CC' : 'Efectivo/Mixto'}`,
-        createdAt: new Date().toISOString()
-      });
+      const pList: { method: string; amount: number }[] = [
+        { method: 'EFECTIVO', amount: ef },
+        { method: 'DEBITO', amount: dbPay },
+        { method: 'CREDITO', amount: crPay },
+        { method: 'TRANSFERENCIA', amount: trPay },
+        { method: 'MERCADO_PAGO', amount: mpPay },
+        { method: 'CUENTA_CORRIENTE', amount: ccPay }
+      ].filter(p => p.amount > 0);
 
       // Show completed ticket in thermal mock view
       setCompletedSaleDetails({
-        sale: { id: saleId, ...saleData } as Sale,
+        sale: {
+          id: saleId,
+          branchId: userProfile.branchId,
+          registerId: 'REG_MAIN_01',
+          sessionId: activeSession.id,
+          userId: userProfile.id,
+          userName: userProfile.name,
+          customerId: selectedCustomer?.id || undefined,
+          customerName: selectedCustomer?.name || undefined,
+          subtotal: subtotalVal,
+          discount: discVal,
+          surcharge: surVal,
+          taxTotal: taxVal,
+          total: total,
+          paymentMethod: ccPay > 0 ? 'CUENTA_CORRIENTE' : pList.length === 1 ? pList[0].method : 'MIXTO',
+          status: SaleStatus.COMPLETED,
+          isFiscal: false,
+          createdAt: new Date().toISOString()
+        } as Sale,
         items: [...cart],
         payments: pList
       });
@@ -525,7 +477,8 @@ export const POSView: React.FC<POSViewProps> = ({
       onRefreshCaja();
       fetchData(); // reload stocks
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `businesses/${businessId}/sales`);
+      alert("Error de conexión al intentar finalizar la venta de forma segura en el servidor.");
+      console.error(error);
     }
   };
 

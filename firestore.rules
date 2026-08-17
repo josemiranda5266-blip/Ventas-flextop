@@ -201,6 +201,11 @@ service cloud.firestore {
         allow update: if isVerifiedUser() && isAdmin(businessId) && incoming().id == existing().id;
         allow delete: if false;
       }
+
+      // --- Secrets ---
+      match /secrets/{secretId} {
+        allow read, write: if false;
+      }
     }
   }
 }
